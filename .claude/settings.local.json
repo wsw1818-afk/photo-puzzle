@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-expo-app@latest:*)",
+      "Bash(npm install:*)",
+      "Bash(cat:*)",
+      "Bash(npx expo prebuild:*)",
+      "Bash(./gradlew.bat:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
