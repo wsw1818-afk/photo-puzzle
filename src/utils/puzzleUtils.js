@@ -4,9 +4,10 @@
  * 난이도에 따른 그리드 크기 반환
  */
 export const DIFFICULTY_CONFIG = {
-  easy: { gridSize: 3, label: '쉬움 (3x3)', wrongChoices: 1 },
-  medium: { gridSize: 4, label: '보통 (4x4)', wrongChoices: 2 },
-  hard: { gridSize: 5, label: '어려움 (5x5)', wrongChoices: 3 },
+  easy: { gridSize: 3, label: '쉬움 (3x3)', wrongChoices: 1, hintPieces: 1 },
+  medium: { gridSize: 4, label: '보통 (4x4)', wrongChoices: 2, hintPieces: 2 },
+  hard: { gridSize: 5, label: '어려움 (5x5)', wrongChoices: 3, hintPieces: 3 },
+  veryHard: { gridSize: 6, label: '매우 어려움 (6x6)', wrongChoices: 4, hintPieces: 4 },
 };
 
 /**

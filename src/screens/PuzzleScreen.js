@@ -19,10 +19,9 @@ import {
 } from '../utils/puzzleUtils';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-const MAX_PUZZLE_WIDTH = screenWidth - 32; // 최대 퍼즐 너비
-const MAX_PUZZLE_HEIGHT = screenHeight * 0.55; // 최대 퍼즐 높이 (화면의 55%)
-const CHOICE_AREA_HEIGHT = 180; // 선택지 영역 높이
-const PREVIEW_TIME = 10; // 미리보기 시간 (초)
+const MAX_PUZZLE_WIDTH = screenWidth - 32;
+const MAX_PUZZLE_HEIGHT = screenHeight * 0.50;
+const PREVIEW_TIME = 10;
 
 export default function PuzzleScreen({ navigation, route }) {
   const { imageUri, imageWidth, imageHeight, difficulty } = route.params;
@@ -34,11 +33,9 @@ export default function PuzzleScreen({ navigation, route }) {
   let puzzleWidth, puzzleHeight;
 
   if (imageRatio > MAX_PUZZLE_WIDTH / MAX_PUZZLE_HEIGHT) {
-    // 가로가 더 긴 이미지
     puzzleWidth = MAX_PUZZLE_WIDTH;
     puzzleHeight = MAX_PUZZLE_WIDTH / imageRatio;
   } else {
-    // 세로가 더 긴 이미지
     puzzleHeight = MAX_PUZZLE_HEIGHT;
     puzzleWidth = MAX_PUZZLE_HEIGHT * imageRatio;
   }
@@ -49,13 +46,15 @@ export default function PuzzleScreen({ navigation, route }) {
 
   // 상태
   const [pieces, setPieces] = useState([]);
-  const [selectedSlot, setSelectedSlot] = useState(null); // 선택된 빈 칸
-  const [choices, setChoices] = useState([]); // 하단 선택지
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [choices, setChoices] = useState([]);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
   const [moveCount, setMoveCount] = useState(0);
-  const [isPreview, setIsPreview] = useState(true); // 미리보기 상태
-  const [previewCountdown, setPreviewCountdown] = useState(PREVIEW_TIME); // 미리보기 카운트다운
+  const [isPreview, setIsPreview] = useState(true);
+  const [previewCountdown, setPreviewCountdown] = useState(PREVIEW_TIME);
+  const [remainingHints, setRemainingHints] = useState(config.hintPieces || 0);
+  const [wrongSlots, setWrongSlots] = useState([]); // 틀린 슬롯 ID 목록
 
   // 각 조각 크기 계산
   const pieceWidth = puzzleWidth / gridSize;
@@ -63,7 +62,7 @@ export default function PuzzleScreen({ navigation, route }) {
 
   // 퍼즐 초기화
   useEffect(() => {
-    console.log('[PuzzleScreen] 퍼즐 초기화 - 그리드:', gridSize);
+    console.log('[PuzzleScreen] 퍼즐 초기화 - 그리드:', gridSize, '힌트:', config.hintPieces);
     const initialPieces = generatePuzzlePieces(gridSize, puzzleWidth, puzzleHeight);
     setPieces(initialPieces);
     console.log('[PuzzleScreen] 퍼즐 조각 생성 완료:', initialPieces.length, '개');
@@ -86,7 +85,7 @@ export default function PuzzleScreen({ navigation, route }) {
     return () => clearTimeout(timer);
   }, [isPreview, previewCountdown]);
 
-  // 게임 타이머 (미리보기 끝난 후 시작)
+  // 게임 타이머
   useEffect(() => {
     if (isComplete || isPreview) return;
 
@@ -120,7 +119,6 @@ export default function PuzzleScreen({ navigation, route }) {
       console.log('[PuzzleScreen] 슬롯 선택 - ID:', piece.id, '위치:', piece.row, piece.col);
       setSelectedSlot(piece);
 
-      // 해당 위치에 맞는 정답 조각과 오답 조각들로 선택지 생성
       const unplacedPieces = pieces.filter((p) => !p.isPlaced);
       const newChoices = generateChoices(piece, unplacedPieces, config.wrongChoices);
       console.log('[PuzzleScreen] 선택지 생성:', newChoices.length, '개');
@@ -136,25 +134,47 @@ export default function PuzzleScreen({ navigation, route }) {
 
       setMoveCount((prev) => prev + 1);
 
-      // 정답 체크
       const isCorrect = chosenPiece.id === selectedSlot.id;
       console.log('[PuzzleScreen] 조각 선택 - 선택:', chosenPiece.id, '정답:', selectedSlot.id, isCorrect ? '✅ 정답!' : '❌ 오답');
 
       if (isCorrect) {
-        // 정답! - 조각 배치 (useEffect에서 완성 체크)
+        // 정답: 조각 배치 (placedBy: 'correct')
         setPieces((prev) =>
           prev.map((p) =>
-            p.id === selectedSlot.id ? { ...p, isPlaced: true } : p
+            p.id === selectedSlot.id ? { ...p, isPlaced: true, placedBy: 'correct' } : p
           )
         );
+        // 틀린 목록에서 제거 (혹시 있으면)
+        setWrongSlots((prev) => prev.filter((id) => id !== selectedSlot.id));
+      } else {
+        // 오답: 틀린 슬롯으로 표시 (잠시 후 사라짐)
+        setWrongSlots((prev) => [...prev, selectedSlot.id]);
+        setTimeout(() => {
+          setWrongSlots((prev) => prev.filter((id) => id !== selectedSlot.id));
+        }, 1500);
       }
 
-      // 선택 초기화
       setSelectedSlot(null);
       setChoices([]);
     },
     [selectedSlot]
   );
+
+  // 힌트 사용 (선택된 슬롯에 정답 배치)
+  const handleUseHint = useCallback(() => {
+    if (!selectedSlot || remainingHints <= 0 || isComplete || isPreview) return;
+
+    console.log('[PuzzleScreen] 힌트 사용 - 슬롯:', selectedSlot.id, '남은 힌트:', remainingHints - 1);
+
+    setPieces((prev) =>
+      prev.map((p) =>
+        p.id === selectedSlot.id ? { ...p, isPlaced: true, placedBy: 'hint' } : p
+      )
+    );
+    setRemainingHints((prev) => prev - 1);
+    setSelectedSlot(null);
+    setChoices([]);
+  }, [selectedSlot, remainingHints, isComplete, isPreview]);
 
   // 게임 재시작
   const handleRestart = () => {
@@ -168,6 +188,8 @@ export default function PuzzleScreen({ navigation, route }) {
     setMoveCount(0);
     setIsPreview(true);
     setPreviewCountdown(PREVIEW_TIME);
+    setRemainingHints(config.hintPieces || 0);
+    setWrongSlots([]);
   };
 
   // 미리보기 스킵
@@ -181,94 +203,196 @@ export default function PuzzleScreen({ navigation, route }) {
     navigation.navigate('Home');
   };
 
+  // 남은 조각 수
+  const remainingPieces = pieces.filter((p) => !p.isPlaced).length;
+  const totalPieces = pieces.length;
+  const progressPercent = totalPieces > 0 ? ((totalPieces - remainingPieces) / totalPieces) * 100 : 0;
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* 상단 정보 바 */}
+      {/* 장식 원형 */}
+      <View style={styles.decorCircle1} />
+
+      {/* 상단 바 */}
       <View style={styles.topBar}>
-        <TouchableOpacity style={styles.backButton} onPress={handleGoHome}>
-          <Text style={styles.backText}>✕</Text>
+        <TouchableOpacity style={styles.iconButton} onPress={handleGoHome} activeOpacity={0.7}>
+          <Text style={styles.iconButtonText}>✕</Text>
         </TouchableOpacity>
 
-        <View style={styles.statsContainer}>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>시간</Text>
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={styles.statIcon}>⏱️</Text>
             <Text style={styles.statValue}>{formatTime(elapsedTime)}</Text>
           </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>이동</Text>
+          <View style={styles.statCard}>
+            <Text style={styles.statIcon}>👆</Text>
             <Text style={styles.statValue}>{moveCount}</Text>
           </View>
+          <TouchableOpacity
+            style={[
+              styles.hintButton,
+              (!selectedSlot || remainingHints <= 0 || isPreview) && styles.hintButtonDisabled,
+            ]}
+            onPress={handleUseHint}
+            disabled={!selectedSlot || remainingHints <= 0 || isPreview}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.hintIcon}>💡</Text>
+            <Text style={[
+              styles.hintCount,
+              remainingHints <= 0 && styles.hintCountEmpty,
+            ]}>{remainingHints}</Text>
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={styles.restartButton} onPress={handleRestart}>
-          <Text style={styles.restartText}>↻</Text>
+        <TouchableOpacity style={styles.iconButton} onPress={handleRestart} activeOpacity={0.7}>
+          <Text style={styles.iconButtonTextPrimary}>↻</Text>
         </TouchableOpacity>
       </View>
 
+      {/* 진행 상황 바 */}
+      {!isPreview && !isComplete && (
+        <View style={styles.progressContainer}>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+          </View>
+          <Text style={styles.progressText}>
+            {totalPieces - remainingPieces} / {totalPieces}
+          </Text>
+        </View>
+      )}
+
       {/* 안내 메시지 */}
       <View style={styles.instructionBar}>
-        <Text style={styles.instructionText}>
-          {isComplete
-            ? '🎉 퍼즐 완성!'
-            : isPreview
-            ? `사진을 기억하세요! ${previewCountdown}초`
-            : selectedSlot
-            ? '아래에서 맞는 조각을 선택하세요'
-            : '빈 칸을 터치하세요'}
-        </Text>
+        {isComplete ? (
+          <View style={styles.completeBadge}>
+            <Text style={styles.completeBadgeText}>🎉 퍼즐 완성!</Text>
+          </View>
+        ) : isPreview ? (
+          <View style={styles.previewBadge}>
+            <Text style={styles.previewBadgeText}>사진을 기억하세요!</Text>
+            <View style={styles.countdownCircle}>
+              <Text style={styles.countdownText}>{previewCountdown}</Text>
+            </View>
+          </View>
+        ) : (
+          <Text style={styles.instructionText}>
+            {selectedSlot ? '아래에서 맞는 조각을 선택하세요' : '빈 칸을 터치하세요'}
+          </Text>
+        )}
       </View>
 
       {/* 퍼즐 보드 */}
       <View style={[styles.puzzleBoard, { width: puzzleWidth, height: puzzleHeight }]}>
         {isPreview || isComplete ? (
-          // 미리보기 또는 완료: 전체 이미지 표시
-          <Image
-            source={{ uri: imageUri }}
-            style={styles.previewImage}
-            resizeMode="cover"
-          />
+          <View style={{ width: puzzleWidth, height: puzzleHeight }}>
+            <Image
+              source={{ uri: imageUri }}
+              style={{ width: puzzleWidth, height: puzzleHeight, borderRadius: 8 }}
+              resizeMode="cover"
+            />
+            {/* 미리보기/완성 시 그리드 라인 표시 */}
+            {isPreview && (
+              <View style={styles.gridOverlay} pointerEvents="none">
+                {Array.from({ length: gridSize - 1 }).map((_, i) => (
+                  <View
+                    key={`preview-h-${i}`}
+                    style={[
+                      styles.previewGridLine,
+                      { top: (i + 1) * pieceHeight, width: puzzleWidth, height: 2 },
+                    ]}
+                  />
+                ))}
+                {Array.from({ length: gridSize - 1 }).map((_, i) => (
+                  <View
+                    key={`preview-v-${i}`}
+                    style={[
+                      styles.previewGridLine,
+                      { left: (i + 1) * pieceWidth, height: puzzleHeight, width: 2 },
+                    ]}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
         ) : (
-          // 게임 모드: 퍼즐 조각들 표시
-          pieces.map((piece) => (
-            <TouchableOpacity
-              key={piece.id}
-              style={[
-                styles.puzzleSlot,
-                {
-                  width: pieceWidth - 2,
-                  height: pieceHeight - 2,
-                  left: piece.col * pieceWidth + 1,
-                  top: piece.row * pieceHeight + 1,
-                },
-                selectedSlot?.id === piece.id && styles.selectedSlot,
-                piece.isPlaced && styles.placedSlot,
-              ]}
-              onPress={() => handleSlotPress(piece)}
-              disabled={piece.isPlaced}
-              activeOpacity={0.7}
-            >
-              {piece.isPlaced ? (
-                <Image
-                  source={{ uri: imageUri }}
+          pieces.map((piece) => {
+            const isWrong = wrongSlots.includes(piece.id);
+            const isHint = piece.placedBy === 'hint';
+            const isCorrect = piece.placedBy === 'correct';
+
+            // 배치된 조각: 사각형
+            if (piece.isPlaced) {
+              return (
+                <View
+                  key={piece.id}
                   style={[
-                    styles.pieceImage,
+                    styles.puzzleSlot,
                     {
-                      width: puzzleWidth,
-                      height: puzzleHeight,
-                      left: -piece.col * pieceWidth,
-                      top: -piece.row * pieceHeight,
+                      left: piece.col * pieceWidth,
+                      top: piece.row * pieceHeight,
+                      width: pieceWidth - 2,
+                      height: pieceHeight - 2,
                     },
                   ]}
-                />
-              ) : (
-                <Text style={styles.slotNumber}>{piece.id + 1}</Text>
-              )}
-            </TouchableOpacity>
-          ))
+                >
+                  <View style={{ width: pieceWidth - 2, height: pieceHeight - 2, overflow: 'hidden' }}>
+                    <Image
+                      source={{ uri: imageUri }}
+                      style={{
+                        position: 'absolute',
+                        left: -piece.col * pieceWidth,
+                        top: -piece.row * pieceHeight,
+                        width: puzzleWidth,
+                        height: puzzleHeight,
+                      }}
+                      resizeMode="cover"
+                    />
+                  </View>
+                  {/* 힌트로 배치된 경우 표시 */}
+                  {isHint && (
+                    <View style={styles.hintOverlay}>
+                      <Text style={styles.hintOverlayIcon}>💡</Text>
+                    </View>
+                  )}
+                  {/* 정답으로 배치된 경우 표시 */}
+                  {isCorrect && (
+                    <View style={styles.correctOverlay}>
+                      <Text style={styles.correctOverlayIcon}>✓</Text>
+                    </View>
+                  )}
+                </View>
+              );
+            }
+
+            // 미배치 조각: 빈 슬롯
+            return (
+              <TouchableOpacity
+                key={piece.id}
+                style={[
+                  styles.puzzleSlot,
+                  selectedSlot?.id === piece.id && styles.selectedSlot,
+                  isWrong && styles.wrongSlot,
+                  {
+                    left: piece.col * pieceWidth,
+                    top: piece.row * pieceHeight,
+                    width: pieceWidth - 2,
+                    height: pieceHeight - 2,
+                  },
+                ]}
+                onPress={() => handleSlotPress(piece)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.slotNumber, isWrong && { color: colors.error }]}>
+                  {isWrong ? '✕' : piece.id + 1}
+                </Text>
+              </TouchableOpacity>
+            );
+          })
         )}
 
-        {/* 그리드 라인 표시용 오버레이 (미리보기 + 게임 중) */}
-        {!isComplete && (
+        {/* 그리드 라인 */}
+        {!isPreview && !isComplete && (
           <View style={styles.gridOverlay} pointerEvents="none">
             {Array.from({ length: gridSize - 1 }).map((_, i) => (
               <View
@@ -276,11 +400,7 @@ export default function PuzzleScreen({ navigation, route }) {
                 style={[
                   styles.gridLine,
                   isPreview && styles.previewGridLine,
-                  {
-                    top: (i + 1) * pieceHeight,
-                    width: puzzleWidth,
-                    height: 2,
-                  },
+                  { top: (i + 1) * pieceHeight, width: puzzleWidth, height: 2 },
                 ]}
               />
             ))}
@@ -290,11 +410,7 @@ export default function PuzzleScreen({ navigation, route }) {
                 style={[
                   styles.gridLine,
                   isPreview && styles.previewGridLine,
-                  {
-                    left: (i + 1) * pieceWidth,
-                    height: puzzleHeight,
-                    width: 2,
-                  },
+                  { left: (i + 1) * pieceWidth, height: puzzleHeight, width: 2 },
                 ]}
               />
             ))}
@@ -305,62 +421,79 @@ export default function PuzzleScreen({ navigation, route }) {
       {/* 선택지 영역 */}
       <View style={styles.choiceArea}>
         {isComplete ? (
-          // 완료: 결과 및 버튼 표시
           <View style={styles.completionArea}>
-            <Text style={styles.completionStats}>
-              시간: {formatTime(elapsedTime)} | 이동: {moveCount}회
-            </Text>
+            <View style={styles.resultCard}>
+              <View style={styles.resultRow}>
+                <View style={styles.resultItem}>
+                  <Text style={styles.resultIcon}>⏱️</Text>
+                  <Text style={styles.resultLabel}>시간</Text>
+                  <Text style={styles.resultValue}>{formatTime(elapsedTime)}</Text>
+                </View>
+                <View style={styles.resultDivider} />
+                <View style={styles.resultItem}>
+                  <Text style={styles.resultIcon}>👆</Text>
+                  <Text style={styles.resultLabel}>이동</Text>
+                  <Text style={styles.resultValue}>{moveCount}회</Text>
+                </View>
+              </View>
+            </View>
             <View style={styles.completionButtons}>
               <TouchableOpacity
-                style={styles.completionButtonPrimary}
+                style={styles.primaryButton}
                 onPress={handleRestart}
-                activeOpacity={0.7}
+                activeOpacity={0.85}
               >
-                <Text style={styles.completionButtonText}>다시하기</Text>
+                <Text style={styles.primaryButtonText}>다시하기</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.completionButtonSecondary}
+                style={styles.secondaryButton}
                 onPress={handleGoHome}
-                activeOpacity={0.7}
+                activeOpacity={0.85}
               >
-                <Text style={styles.completionButtonTextSecondary}>홈으로</Text>
+                <Text style={styles.secondaryButtonText}>홈으로</Text>
               </TouchableOpacity>
             </View>
           </View>
         ) : isPreview ? (
-          // 미리보기 중: 스킵 버튼
           <TouchableOpacity
             style={styles.skipButton}
             onPress={handleSkipPreview}
-            activeOpacity={0.7}
+            activeOpacity={0.85}
           >
             <Text style={styles.skipButtonText}>건너뛰기</Text>
+            <Text style={styles.skipButtonArrow}>→</Text>
           </TouchableOpacity>
         ) : choices.length > 0 ? (
           <View style={styles.choiceContainer}>
             {choices.map((choice, index) => {
-              // 선택지 크기를 이미지 비율에 맞게 계산 (최대 80px 높이 기준)
-              const choiceHeight = 80;
-              const choiceWidth = choiceHeight * imageRatio;
+              // 선택지용 스케일 계산
+              const choiceDisplayHeight = 70;
+              const scale = choiceDisplayHeight / pieceHeight;
+              const scaledPieceWidth = pieceWidth * scale;
+              const scaledPieceHeight = pieceHeight * scale;
+              const scaledPuzzleWidth = puzzleWidth * scale;
+              const scaledPuzzleHeight = puzzleHeight * scale;
+
               return (
                 <TouchableOpacity
                   key={`choice-${choice.id}-${index}`}
-                  style={[styles.choiceItem, { width: choiceWidth, height: choiceHeight }]}
+                  style={[styles.choiceItem, { width: scaledPieceWidth, height: scaledPieceHeight }]}
                   onPress={() => handleChoiceSelect(choice)}
-                  activeOpacity={0.7}
+                  activeOpacity={0.85}
                 >
-                  <View style={[styles.choiceImageWrapper, { width: choiceWidth, height: choiceHeight }]}>
+                  <View style={[styles.choiceImageWrapper, { width: scaledPieceWidth, height: scaledPieceHeight }]}>
                     <Image
                       source={{ uri: imageUri }}
                       style={[
                         styles.choiceImage,
                         {
-                          width: puzzleWidth,
-                          height: puzzleHeight,
-                          left: -choice.col * pieceWidth,
-                          top: -choice.row * pieceHeight,
+                          left: -choice.col * scaledPieceWidth,
+                          top: -choice.row * scaledPieceHeight,
+                          width: scaledPuzzleWidth,
+                          height: scaledPuzzleHeight,
                         },
                       ]}
+                      resizeMode="cover"
                     />
                   </View>
                 </TouchableOpacity>
@@ -368,12 +501,12 @@ export default function PuzzleScreen({ navigation, route }) {
             })}
           </View>
         ) : (
-          <Text style={styles.choicePlaceholder}>
-            위에서 빈 칸을 선택하세요
-          </Text>
+          <View style={styles.placeholderContainer}>
+            <Text style={styles.placeholderEmoji}>👆</Text>
+            <Text style={styles.choicePlaceholder}>위에서 빈 칸을 선택하세요</Text>
+          </View>
         )}
       </View>
-
     </SafeAreaView>
   );
 }
@@ -383,96 +516,263 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  decorCircle1: {
+    position: 'absolute',
+    top: -60,
+    right: -40,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: colors.primaryLight + '15',
+  },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  iconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 3,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 6,
   },
-  backText: {
+  iconButtonText: {
     fontSize: 20,
     color: colors.textSecondary,
   },
-  statsContainer: {
+  iconButtonTextPrimary: {
+    fontSize: 24,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  statsRow: {
     flexDirection: 'row',
-    gap: 24,
+    gap: 12,
   },
-  statItem: {
+  statCard: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+    elevation: 2,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
   },
-  statLabel: {
-    fontSize: 12,
-    color: colors.textSecondary,
+  statIcon: {
+    fontSize: 14,
   },
   statValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
-  restartButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.surface,
-    justifyContent: 'center',
+  hintButton: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: colors.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 4,
+    elevation: 3,
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
-  restartText: {
-    fontSize: 22,
-    color: colors.primary,
+  hintButtonDisabled: {
+    backgroundColor: colors.puzzleBorder,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  hintIcon: {
+    fontSize: 14,
+  },
+  hintCount: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textLight,
+  },
+  hintCountEmpty: {
+    color: colors.textSecondary,
+  },
+  progressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 8,
+    gap: 12,
+  },
+  progressBar: {
+    flex: 1,
+    height: 6,
+    backgroundColor: colors.puzzleBorder,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+    borderRadius: 3,
+  },
+  progressText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
   },
   instructionBar: {
-    paddingVertical: 8,
+    paddingVertical: 12,
     alignItems: 'center',
   },
   instructionText: {
-    fontSize: 14,
+    fontSize: 15,
     color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  completeBadge: {
+    backgroundColor: colors.success + '20',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 25,
+  },
+  completeBadgeText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  previewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  previewBadgeText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  countdownCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  countdownText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textLight,
   },
   puzzleBoard: {
     alignSelf: 'center',
     backgroundColor: colors.surface,
-    borderRadius: 8,
-    elevation: 4,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    borderRadius: 16,
+    elevation: 8,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
     position: 'relative',
     overflow: 'hidden',
   },
   puzzleSlot: {
     position: 'absolute',
     backgroundColor: colors.surfaceLight,
-    borderRadius: 4,
+    borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
   },
   selectedSlot: {
     borderWidth: 3,
-    borderColor: colors.puzzleSelected,
-    backgroundColor: colors.primaryLight + '30',
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '15',
   },
-  placedSlot: {
+  placedPieceContainer: {
+    position: 'absolute',
+    overflow: 'hidden',
     backgroundColor: 'transparent',
   },
+  wrongSlot: {
+    borderWidth: 3,
+    borderColor: colors.error,
+    backgroundColor: colors.error + '20',
+  },
+  slotContent: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  wrongSlotContent: {
+    backgroundColor: colors.error + '30',
+  },
+  wrongIcon: {
+    fontSize: 24,
+    color: colors.error,
+    fontWeight: '800',
+  },
   slotNumber: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    fontWeight: '500',
+    fontSize: 14,
+    color: colors.textTertiary,
+    fontWeight: '600',
   },
   pieceImage: {
     position: 'absolute',
+  },
+  hintOverlay: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+  },
+  hintOverlayIcon: {
+    fontSize: 12,
+  },
+  correctOverlay: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.success,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: colors.success,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+  },
+  correctOverlayIcon: {
+    fontSize: 14,
+    color: colors.textLight,
+    fontWeight: '800',
   },
   previewImage: {
     width: '100%',
@@ -490,17 +790,28 @@ const styles = StyleSheet.create({
     backgroundColor: colors.puzzleBorder,
   },
   previewGridLine: {
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    position: 'absolute',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 2,
   },
   choiceArea: {
     flex: 1,
     backgroundColor: colors.surface,
     marginTop: 16,
     marginHorizontal: 16,
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 16,
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 4,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
   },
   choiceContainer: {
     flexDirection: 'row',
@@ -509,75 +820,130 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   choiceItem: {
-    borderRadius: 8,
+    borderRadius: 12,
     overflow: 'hidden',
-    elevation: 2,
+    elevation: 4,
     shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 6,
     borderWidth: 2,
     borderColor: colors.puzzleBorder,
   },
   choiceImageWrapper: {
-    width: 80,
-    height: 80,
     overflow: 'hidden',
   },
   choiceImage: {
     position: 'absolute',
   },
+  placeholderContainer: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  placeholderEmoji: {
+    fontSize: 32,
+  },
   choicePlaceholder: {
-    fontSize: 16,
+    fontSize: 15,
     color: colors.textSecondary,
+    fontWeight: '500',
   },
   skipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.primary,
-    paddingVertical: 14,
-    paddingHorizontal: 40,
-    borderRadius: 25,
+    paddingVertical: 16,
+    paddingHorizontal: 36,
+    borderRadius: 28,
+    gap: 10,
+    elevation: 4,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
   skipButtonText: {
     color: colors.textLight,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
   },
-  // 완료 영역
+  skipButtonArrow: {
+    color: colors.textLight,
+    fontSize: 20,
+    fontWeight: '400',
+  },
   completionArea: {
     alignItems: 'center',
-    gap: 16,
+    width: '100%',
+    gap: 20,
   },
-  completionStats: {
-    fontSize: 18,
+  resultCard: {
+    backgroundColor: colors.surfaceLight,
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+  },
+  resultRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  resultItem: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 4,
+  },
+  resultIcon: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  resultLabel: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  resultValue: {
+    fontSize: 20,
+    fontWeight: '800',
     color: colors.textPrimary,
-    fontWeight: '600',
+  },
+  resultDivider: {
+    width: 1,
+    height: 50,
+    backgroundColor: colors.puzzleBorder,
+    marginHorizontal: 20,
   },
   completionButtons: {
     flexDirection: 'row',
     gap: 12,
   },
-  completionButtonPrimary: {
+  primaryButton: {
     backgroundColor: colors.primary,
     paddingVertical: 14,
     paddingHorizontal: 28,
-    borderRadius: 25,
+    borderRadius: 14,
+    elevation: 4,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
   },
-  completionButtonSecondary: {
-    backgroundColor: colors.surfaceLight,
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 25,
-    borderWidth: 1,
-    borderColor: colors.puzzleBorder,
-  },
-  completionButtonText: {
+  primaryButtonText: {
     color: colors.textLight,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  completionButtonTextSecondary: {
+  secondaryButton: {
+    backgroundColor: colors.surface,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: colors.puzzleBorder,
+  },
+  secondaryButtonText: {
     color: colors.textPrimary,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });
